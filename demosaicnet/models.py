@@ -3,19 +3,19 @@
 # Deep Joint Demosaicking and Denoising
 # Siggraph Asia 2016
 # Michael Gharbi, Gaurav Chaurasia, Sylvain Paris, Fredo Durand
-# 
+#
 # Copyright (c) 2016 Michael Gharbi
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -74,6 +74,7 @@ def _convolution(bottom, width, ksize, pad=True, bias=True):
 def demosaic(depth, width, ksize, batch_size,
              non_linearity='relu',
              mosaic_type='bayer', trainset=None,
+             groundtruth_set=None,
              train_mode=True,
              min_noise=0, max_noise=0, pad=True,
              batch_norm=False):
@@ -100,7 +101,10 @@ def demosaic(depth, width, ksize, batch_size,
     if add_noise and min_noise > max_noise:
         raise ValueError('min noise is greater than max_noise')
 
-    if trainset is not None:  # Build the network with database connection
+    if groundtruth_set is not None and add_noise:
+        raise ValueError('when ground truth set is provided, input should be noisy mosaic')
+
+    if trainset is not None and groundtruth_set is None:  # Build the network with database connection
         # Read from an LMDB database for train and validation sets
         net.demosaicked = L.Data(
             data_param={'source': trainset,
@@ -143,6 +147,34 @@ def demosaic(depth, width, ksize, batch_size,
                                                  'layer': 'XTransMosaickLayer'})
         # ---------------------------------------------------------------------
 
+    elif trainset is not None and groundtruth_set is not None: #connect to ground truth set and trainset LMDB
+        """
+        The input is 128x128x1 mosaic
+        """
+        net.mosaick_mono = L.Data(
+            data_param = {'source': trainset,
+                        'backend': P.Data.LMDB,
+                        'batch_size': batch_size},
+                        transform_param={'scale': 0.00390625}
+        )
+        # Convert to 128x128x3 by unpacking
+        net.mosaick = L.Python(bottom = 'mosaick_mono',
+                                python_param = {
+                                    'module':'demosaicnet.layers',
+                                    'layer':'MonoToTriBayer'
+                                })
+
+        """
+        The ground truth is 128x128x3 RGB image
+        """
+        net.groundtruth = L.Data(
+            data_param = {'source': groundtruth_set,
+                        'backend': P.Data.LMDB,
+                        'batch_size': batch_size},
+                        transform_param={'scale': 0.00390625}
+        )
+
+        # ---------------------------------------------------------------------
 
     else:  # Build the test network
         net.mosaick = L.Input(shape=dict(dim=[batch_size, 3, 128, 128]))

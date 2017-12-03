@@ -3,19 +3,19 @@
 # Deep Joint Demosaicking and Denoising
 # Siggraph Asia 2016
 # Michael Gharbi, Gaurav Chaurasia, Sylvain Paris, Fredo Durand
-# 
+#
 # Copyright (c) 2016 Michael Gharbi
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -50,7 +50,7 @@ class BayerMosaickLayer(caffe.Layer):
 
     def forward(self, bottom, top):
         """Bayer Mosaick.
-            
+
            G R G R G
            B G B G B
            G R G R G
@@ -60,6 +60,8 @@ class BayerMosaickLayer(caffe.Layer):
         top[0].data[:, 0, ::2, 1::2] = bottom[0].data[:, 0, ::2, 1::2]    # R
         top[0].data[:, 2, 1::2, ::2] = bottom[0].data[:, 2, 1::2, ::2]    # B
         top[0].data[:, 1, 1::2, 1::2] = bottom[0].data[:, 1, 1::2, 1::2]  # G
+
+        assert len(top[0].data.shape) == 4, "Bayer Mosaic hidden layer is 4D."
 
     def backward(self, top, propagate_down, bottom):
         raise Exception('gradient is invalid')
@@ -161,6 +163,49 @@ class XTransMosaickLayer(caffe.Layer):
     def backward(self, top, propagate_down, bottom):
         raise Exception('gradient is invalid')
 
+class MonoToTriBayer(caffe.Layer):
+    def setup(self, bottom, top):
+        if len(bottom) != 1:
+            raise Exception("Needs one input.")
+
+        if len(top) != 1:
+            raise Exception("Needs one output.")
+
+        if len(bottom[0].data.shape) != 4:
+            raise Exception("Needs 4D input.")
+
+        sz = list(bottom[0].data.shape)
+        if sz[2] % 2 != 0 or sz[3] % 2 != 0:
+            raise Exception("Input should have a spatial extent divisible by 2.")
+
+        if sz[1] != 1:
+            print "To Tri bayer exception: ", sz
+            raise Exception("Needs monochromatic input.")
+
+    def reshape(self, bottom, top):
+        sz = list(bottom[0].data.shape)
+        sz[1] = 3
+        top[0].reshape(*sz)
+
+    def forward(self, bottom, top):
+        sz = list(bottom[0].data.shape)
+
+        """Input is a monochrome array, sample bayer pattern from each layer"""
+        top[0].data[:, 0, ::2, ::2] = bottom[0].data[:, 0, ::2, ::2]  # G
+        top[0].data[:, 1, ::2, 1::2] = bottom[0].data[:, 0, ::2, 1::2]  # R
+        top[0].data[:, 2, 1::2, ::2] = bottom[0].data[:, 0, 1::2, ::2]  # B
+        top[0].data[:, 1, 1::2, 1::2] = bottom[0].data[:, 0, 1::2, 1::2]  # G
+
+        assert top[0].data.shape[1] == 3, "Mono to tri exception, output should be trichromatic"
+
+    def backward(self, top, propagate_down, bottom):
+        if propagate_down[0]:
+            sz = list(bottom[0].data.shape)
+            bottom[0].diff[:, 0, ::2, ::2]   = top[0].diff[:, 0, ::2, ::2] # G
+            bottom[0].diff[:, 0, ::2, 1::2]  = top[0].diff[:, 1, ::2, 1::2]  # R
+            bottom[0].diff[:, 0, 1::2, ::2]  = top[0].diff[:, 2, 1::2, ::2]  # B
+            bottom[0].diff[:, 0, 1::2, 1::2] = top[0].diff[:, 1, 1::2, 1::2]   # G
+
 
 class PackBayerMosaickLayer(caffe.Layer):
     def setup(self, bottom, top):
@@ -177,7 +222,8 @@ class PackBayerMosaickLayer(caffe.Layer):
         if sz[2] % 2 != 0 or sz[3] % 2 != 0:
             raise Exception("Input should have a spatial extent divisible by 2.")
 
-        if sz[1] != 3:
+        if sz[1] != 3 :
+            print "Pack Bayer Layer Exception: ", sz
             raise Exception("Input should be a trichromatic Bayer array.")
 
     def reshape(self, bottom, top):
@@ -188,17 +234,36 @@ class PackBayerMosaickLayer(caffe.Layer):
         top[0].reshape(*sz)
 
     def forward(self, bottom, top):
+        sz = list(bottom[0].data.shape)
+
+        # if sz[1] == 3:
+        """Input is a RGB array, sample bayer pattern from each layer"""
         top[0].data[:, 0, :, :] = bottom[0].data[:, 1, ::2, ::2]  # G
         top[0].data[:, 1, :, :] = bottom[0].data[:, 0, ::2, 1::2]  # R
         top[0].data[:, 2, :, :] = bottom[0].data[:, 2, 1::2, ::2]  # B
         top[0].data[:, 3, :, :] = bottom[0].data[:, 1, 1::2, 1::2]  # G
+        #
+        # elif sz[1] == 1:
+        #     """Input is a Monochrome bayer array, sample from corresponding location"""
+        #     top[0].data[:, 0, :, :] = bottom[0].data[:, 0, ::2, ::2]  # G
+        #     top[0].data[:, 1, :, :] = bottom[0].data[:, 0, ::2, 1::2]  # R
+        #     top[0].data[:, 2, :, :] = bottom[0].data[:, 0, 1::2, ::2]  # B
+        #     top[0].data[:, 3, :, :] = bottom[0].data[:, 0, 1::2, 1::2]  # G
 
     def backward(self, top, propagate_down, bottom):
         if propagate_down[0]:
+            sz = list(bottom[0].data.shape)
+            # if sz[1] == 3:
             bottom[0].diff[:, 1, ::2, ::2]   = top[0].diff[:, 0, :, :] # G
             bottom[0].diff[:, 0, ::2, 1::2]  = top[0].diff[:, 1, :, :]  # R
             bottom[0].diff[:, 2, 1::2, ::2]  = top[0].diff[:, 2, :, :]  # B
             bottom[0].diff[:, 1, 1::2, 1::2] = top[0].diff[:, 3, :, :]   # G
+            # elif sz[1] == 1:
+            #     bottom[0].diff[:, 0, ::2, ::2]   = top[0].diff[:, 0, :, :] # G
+            #     bottom[0].diff[:, 0, ::2, 1::2]  = top[0].diff[:, 1, :, :]  # R
+            #     bottom[0].diff[:, 0, 1::2, ::2]  = top[0].diff[:, 2, :, :]  # B
+            #     bottom[0].diff[:, 0, 1::2, 1::2] = top[0].diff[:, 3, :, :]   # G
+
 
 
 class UnpackBayerMosaickLayer(caffe.Layer):
@@ -234,8 +299,8 @@ class UnpackBayerMosaickLayer(caffe.Layer):
         if propagate_down[0]:
             for c in range(3):
                 bottom[0].diff[:, 4*c, :, :]   = top[0].diff[:, c, ::2, ::2]
-                bottom[0].diff[:, 4*c+1, :, :] = top[0].diff[:, c, ::2, 1::2] 
-                bottom[0].diff[:, 4*c+2, :, :] = top[0].diff[:, c, 1::2, ::2] 
+                bottom[0].diff[:, 4*c+1, :, :] = top[0].diff[:, c, ::2, 1::2]
+                bottom[0].diff[:, 4*c+2, :, :] = top[0].diff[:, c, 1::2, ::2]
                 bottom[0].diff[:, 4*c+3, :, :] = top[0].diff[:, c, 1::2, 1::2]
 
 
@@ -264,7 +329,7 @@ class AddGaussianNoiseLayer(caffe.Layer):
                 raise ValueError("Min noise is greater than max noise")
         except:
             raise ValueError("Could not parse param string.")
-        
+
 
     def reshape(self, bottom, top):
         top[0].reshape(*bottom[0].data.shape)
@@ -324,7 +389,7 @@ class CropLikeLayer(caffe.Layer):
         bottom[0].diff[...] = 0
         for n in range(src_sz[0]):
             for c in range(src_sz[1]):
-                bottom[0].diff[n, c, 
+                bottom[0].diff[n, c,
                     self.offset[2]:self.offset[2]+dst_sz[2],
                     self.offset[3]:self.offset[3]+dst_sz[3]] = top[0].diff[n, c, :, :]
 
@@ -409,7 +474,7 @@ class RandomOffsetLayer(caffe.Layer):
                 raise ValueError("Offset y not provided")
         except:
             raise ValueError("Could not parse param string.")
-        
+
 
     def reshape(self, bottom, top):
         top[0].reshape(*bottom[0].data.shape)
@@ -485,6 +550,8 @@ class NormalizedEuclideanLayer(caffe.Layer):
             raise Exception("Needs 4D input.")
 
         if bottom[0].data.shape != bottom[1].data.shape:
+            print "L2Norm Layer Exception: bottom[0] shape ", bottom[0].data.shape
+            print "L2Norm Layer Exception: bottom[1] shape ", bottom[1].data.shape
             raise Exception("Inputs shapes should match")
 
     def reshape(self, bottom, top):
