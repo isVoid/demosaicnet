@@ -20,10 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python-dev \
         python-numpy \
         python-pip \
-        python-scipy && \
-	dcraw && \
-	libimage-exiftool-perl
-    rm -rf /var/lib/apt/lists/*
+        python-scipy \
+	      dcraw \
+	      libimage-exiftool-perl && \
+        rm -rf /var/lib/apt/lists/*
 
 ENV CAFFE_ROOT=/opt/caffe
 WORKDIR $CAFFE_ROOT
@@ -44,9 +44,9 @@ ENV PATH $CAFFE_ROOT/build/tools:$PYCAFFE_ROOT:$PATH
 RUN echo "$CAFFE_ROOT/build/lib" >> /etc/ld.so.conf.d/caffe.conf && ldconfig
 
 RUN cd /opt/ &&\
-    git clone https://github.com/mgharbi/demosaicnet.git && \
+    git clone https://github.com/isVoid/demosaicnet.git && \
     cd demosaicnet && \
     git checkout f8632e51e2b612fe7041035528114d374be099d9 && \
-    pip install -r requirements.txt
+    pip install tqdm lmdb
 
 WORKDIR /opt/demosaicnet/

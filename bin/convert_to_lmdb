@@ -50,6 +50,7 @@ def main(args):
         for f in sorted(files):
             if regexp.match(f):
                 print 'image', n, f
+                # continue
                 try:
                     im = Image.open(os.path.join(d, f))
                 except IOError:
@@ -57,15 +58,17 @@ def main(args):
                     invalid.append(os.path.join(d, f))
                     continue
                 w, h = im.size
-                if w != PATCH_SIZE or h != PATCH_SIZE:
-                    raise ValueError("Patch size should be {}, got {}x{}".format(
-                                PATCH_SIZE, w,h))
+                # if w != PATCH_SIZE or h != PATCH_SIZE:
+                #     raise ValueError("Patch size should be {}, got {}x{}".format(
+                #                 PATCH_SIZE, w,h))
 
                 im = np.array(im)
                 if len(im.shape) == 2:
-                    im = im.reshape(im.shape[0], im.shape[1], 1)
+                    im = np.expand_dims(im, axis=2)
 
                 h, w, c = im.shape
+                # if c == 1:
+                #     raise ValueError("Does not accept monochromatic images.")
 
                 if c == 4:
                     im = im[:, :, :3]
